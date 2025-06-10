@@ -1,0 +1,50 @@
+# Environment variables and local configs
+.env
+*.env
+application-*.properties
+!application.properties
+!application-test.properties
+
+# Terraform files
+*.tfstate
+*.tfstate.*
+*.tfvars
+.terraform/
+.terraform.lock.hcl
+crash.log
+
+# Maven build directory
+target/
+
+# IDE files
+.idea/
+*.iml
+.vscode/
+.settings/
+.classpath
+.project
+.factorypath
+
+# Compiled class files
+*.class
+
+# Log files
+*.log
+logs/
+
+# Package files
+*.jar
+*.war
+*.ear
+
+# Test coverage reports
+jacoco.exec
+/site/
+/coverage/
+
+# OS generated files
+.DS_Store
+Thumbs.dbaform
+.terraform.lock.hcl
+.env
+.terraform
