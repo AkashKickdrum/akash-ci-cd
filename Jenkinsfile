@@ -1,29 +1,30 @@
 pipeline {
   agent any
 
-  /* Make Jenkins add these tools to PATH for every sh step */
+  /* ──────────── Jenkins Tool Installations to use ──────────── */
   tools {
-    jdk   'jdk21'   // name exactly as in Global Tool Configuration
-    maven 'maven3'  // idem
+    jdk   'jdk21'      // matches the name you configured in Global Tool Configuration
+    maven 'maven3'     // idem
   }
 
+  /* ────────────────────── Global environment ───────────────── */
   environment {
     AWS_DEFAULT_REGION = 'ap-northeast-1'
-    EB_APP = 'spring-version-app'
-    EB_ENV = 'spring-version-env'
+    EB_APP  = 'spring-version-app'
+    EB_ENV  = 'spring-version-env'
 
-    /* SonarQube connection is injected below; no token in plain env */
-    SONARQUBE = 'SonarQube'
+    SONARQUBE = 'SonarQube'     // matches “Server name” in Configure System
+    /* With withSonarQubeEnv Jenkins injects SONAR_AUTH_TOKEN automatically */
   }
 
   stages {
 
-    /* ────────────────────────────  SCM  ──────────────────────────── */
+    /* ────────────────────────── SCM checkout ───────────────────────── */
     stage('Checkout') {
       steps { checkout scm }
     }
 
-    /* ─────────────────────  Compile + Unit tests  ─────────────────── */
+    /* ──────────────── Build, unit tests, coverage ──────────────────── */
     stage('Build & Unit tests') {
       steps {
         dir('spring-app') {
@@ -37,22 +38,21 @@ pipeline {
           dir('spring-app') {
             junit '**/target/surefire-reports/*.xml'
 
-            /* JaCoCo XML → publish via Coverage plugin */
-            publishCoverage adapters: [
-              jacocoAdapter('target/site/jacoco/jacoco.xml')
+            /* Publish JaCoCo XML using the Coverage plugin */
+            recordCoverage tools: [
+              [$class: 'Jacoco', reportFile: 'target/site/jacoco/jacoco.xml']
             ]
           }
         }
       }
     }
 
-    /* ───────────────────────  Static analysis  ────────────────────── */
+    /* ────────────────────── Static analysis (Sonar) ────────────────── */
     stage('SonarQube Analysis') {
       steps {
         dir('spring-app') {
           withMaven(maven: 'maven3', jdk: 'jdk21') {
             withSonarQubeEnv(SONARQUBE) {
-              /* SONAR_AUTH_TOKEN is injected automatically */
               sh 'mvn -B sonar:sonar -Dsonar.projectKey=version-service -Dsonar.token=$SONAR_AUTH_TOKEN'
             }
           }
@@ -60,16 +60,16 @@ pipeline {
       }
     }
 
-    /* ────────────────  Wait for Quality Gate result  ──────────────── */
+    /* ─────────────── Wait until quality gate == “Passed” ───────────── */
     stage('Quality Gate') {
       steps {
-        timeout(time: 10, unit: 'MINUTES') {        // was 5 min → 10 min
+        timeout(time: 10, unit: 'MINUTES') {
           waitForQualityGate abortPipeline: true
         }
       }
     }
 
-    /* ────────────────────────  Package JAR  ───────────────────────── */
+    /* ───────────────────────── Package the JAR ─────────────────────── */
     stage('Package') {
       steps {
         dir('spring-app') {
@@ -80,7 +80,7 @@ pipeline {
       }
     }
 
-    /* ───────────  Upload & deploy to Elastic Beanstalk  ───────────── */
+    /* ─────────────── Deploy new version to Elastic Beanstalk ───────── */
     stage('Deploy to Elastic Beanstalk') {
       steps {
         sh '''
@@ -92,8 +92,10 @@ pipeline {
           cd ..
           zip -r app-$VERSION.zip eb-bundle
 
+          # upload bundle
           aws s3 cp app-$VERSION.zip s3://$EB_APP-artifacts/app-$VERSION.zip
 
+          # register & deploy
           aws elasticbeanstalk create-application-version \
               --application-name $EB_APP \
               --version-label $VERSION \
@@ -110,7 +112,11 @@ pipeline {
     }
   }
 
+  /* ──────────────────────── Post-build section ─────────────────────── */
   post {
-    failure { echo "Pipeline failed ➜ ${env.BUILD_URL}" }
+    failure {
+      echo "Pipeline failed  ➜  ${env.BUILD_URL}"
+      // e-mail step removed; add it later when SMTP is configured
+    }
   }
 }
