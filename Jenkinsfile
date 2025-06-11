@@ -1,6 +1,12 @@
 pipeline {
   agent any
 
+  /* Tell Jenkins which tool installations to put on PATH */
+  tools {
+    jdk   'jdk21'   // the name you added in “Global Tool Configuration”
+    maven 'maven3'  // ditto
+  }
+
   environment {
     AWS_DEFAULT_REGION = 'ap-northeast-1'
     EB_APP  = 'spring-version-app'
@@ -16,10 +22,12 @@ pipeline {
       steps { checkout scm }
     }
 
-    stage('Build + Unit tests') {
+    stage('Build & Unit tests') {
       steps {
         dir('spring-app') {
-          sh 'mvn -B clean test'
+          withMaven(maven: 'maven3', jdk: 'jdk21') {
+            sh 'mvn -B clean test'
+          }
         }
       }
       post {
@@ -35,12 +43,10 @@ pipeline {
     stage('SonarQube Analysis') {
       steps {
         dir('spring-app') {
-          withSonarQubeEnv(SONARQUBE) {
-            sh """
-              mvn -B sonar:sonar \
-                -Dsonar.projectKey=version-service \
-                -Dsonar.login=$SONAR_TOKEN
-            """
+          withMaven(maven: 'maven3', jdk: 'jdk21') {
+            withSonarQubeEnv(SONARQUBE) {
+              sh "mvn -B sonar:sonar -Dsonar.projectKey=version-service -Dsonar.login=$SONAR_TOKEN"
+            }
           }
         }
       }
@@ -57,7 +63,9 @@ pipeline {
     stage('Package') {
       steps {
         dir('spring-app') {
-          sh 'mvn -B package -DskipTests'
+          withMaven(maven: 'maven3', jdk: 'jdk21') {
+            sh 'mvn -B package -DskipTests'
+          }
         }
       }
     }
@@ -68,16 +76,13 @@ pipeline {
           cd spring-app
           VERSION=$(date +%Y%m%d%H%M%S)
 
-          # Bundle the jar
           mkdir -p ../eb-bundle
           cp target/*.jar ../eb-bundle/application.jar
           cd ..
           zip -r app-$VERSION.zip eb-bundle
 
-          # Upload to S3 (bucket was created by Terraform)
           aws s3 cp app-$VERSION.zip s3://$EB_APP-artifacts/app-$VERSION.zip
 
-          # Register application version & deploy
           aws elasticbeanstalk create-application-version \
               --application-name $EB_APP \
               --version-label $VERSION \
@@ -96,8 +101,8 @@ pipeline {
 
   post {
     failure {
-      echo "Pipeline failed  ➜  ${env.BUILD_URL}"
-      // (Optional) configure e-mail once SMTP is available
+      echo "Pipeline failed ➜ ${env.BUILD_URL}"
+      /* mail step removed until SMTP is available */
     }
   }
 }

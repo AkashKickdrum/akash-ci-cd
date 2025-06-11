@@ -14,6 +14,7 @@
     <spring-boot.version>3.3.0</spring-boot.version>
   </properties>
 
+  <!-- inherits dependency versions -->
   <dependencyManagement>
     <dependencies>
       <dependency>
@@ -40,10 +41,14 @@
 
   <build>
     <plugins>
+      <!-- explicit version to remove warning -->
       <plugin>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-maven-plugin</artifactId>
+        <version>${spring-boot.version}</version>
       </plugin>
+
+      <!-- coverage -->
       <plugin>
         <groupId>org.jacoco</groupId>
         <artifactId>jacoco-maven-plugin</artifactId>
@@ -54,16 +59,15 @@
         </executions>
       </plugin>
 
+      <!-- compile with JDK 21 -->
       <plugin>
-      <groupId>org.apache.maven.plugins</groupId>
-      <artifactId>maven-compiler-plugin</artifactId>
-      <version>3.11.0</version>
-      <configuration>
-        <!-- Since JDK 9, use <release>; it sets both source & target -->
-        <release>${java.version}</release>
-      </configuration>
-    </plugin>
-
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.11.0</version>
+        <configuration>
+          <release>${java.version}</release>
+        </configuration>
+      </plugin>
     </plugins>
   </build>
 </project>
