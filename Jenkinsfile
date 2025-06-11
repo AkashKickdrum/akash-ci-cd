@@ -1,27 +1,29 @@
 pipeline {
   agent any
 
-  /* Tell Jenkins which tool installations to put on PATH */
+  /* Make Jenkins add these tools to PATH for every sh step */
   tools {
-    jdk   'jdk21'   // the name you added in “Global Tool Configuration”
-    maven 'maven3'  // ditto
+    jdk   'jdk21'   // name exactly as in Global Tool Configuration
+    maven 'maven3'  // idem
   }
 
   environment {
     AWS_DEFAULT_REGION = 'ap-northeast-1'
-    EB_APP  = 'spring-version-app'
-    EB_ENV  = 'spring-version-env'
+    EB_APP = 'spring-version-app'
+    EB_ENV = 'spring-version-env'
 
-    SONARQUBE   = 'SonarQube'
-    SONAR_TOKEN = credentials('sonar-token')
+    /* SonarQube connection is injected below; no token in plain env */
+    SONARQUBE = 'SonarQube'
   }
 
   stages {
 
+    /* ────────────────────────────  SCM  ──────────────────────────── */
     stage('Checkout') {
       steps { checkout scm }
     }
 
+    /* ─────────────────────  Compile + Unit tests  ─────────────────── */
     stage('Build & Unit tests') {
       steps {
         dir('spring-app') {
@@ -33,33 +35,41 @@ pipeline {
       post {
         always {
           dir('spring-app') {
-            junit  '**/target/surefire-reports/*.xml'
-            jacoco execPattern: '**/jacoco.exec'
+            junit '**/target/surefire-reports/*.xml'
+
+            /* JaCoCo XML → publish via Coverage plugin */
+            publishCoverage adapters: [
+              jacocoAdapter('target/site/jacoco/jacoco.xml')
+            ]
           }
         }
       }
     }
 
+    /* ───────────────────────  Static analysis  ────────────────────── */
     stage('SonarQube Analysis') {
       steps {
         dir('spring-app') {
           withMaven(maven: 'maven3', jdk: 'jdk21') {
             withSonarQubeEnv(SONARQUBE) {
-              sh "mvn -B sonar:sonar -Dsonar.projectKey=version-service -Dsonar.login=$SONAR_TOKEN"
+              /* SONAR_AUTH_TOKEN is injected automatically */
+              sh 'mvn -B sonar:sonar -Dsonar.projectKey=version-service -Dsonar.token=$SONAR_AUTH_TOKEN'
             }
           }
         }
       }
     }
 
+    /* ────────────────  Wait for Quality Gate result  ──────────────── */
     stage('Quality Gate') {
       steps {
-        timeout(time: 5, unit: 'MINUTES') {
+        timeout(time: 10, unit: 'MINUTES') {        // was 5 min → 10 min
           waitForQualityGate abortPipeline: true
         }
       }
     }
 
+    /* ────────────────────────  Package JAR  ───────────────────────── */
     stage('Package') {
       steps {
         dir('spring-app') {
@@ -70,6 +80,7 @@ pipeline {
       }
     }
 
+    /* ───────────  Upload & deploy to Elastic Beanstalk  ───────────── */
     stage('Deploy to Elastic Beanstalk') {
       steps {
         sh '''
@@ -100,9 +111,6 @@ pipeline {
   }
 
   post {
-    failure {
-      echo "Pipeline failed ➜ ${env.BUILD_URL}"
-      /* mail step removed until SMTP is available */
-    }
+    failure { echo "Pipeline failed ➜ ${env.BUILD_URL}" }
   }
 }
