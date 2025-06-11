@@ -34,7 +34,7 @@ pipeline {
       post {
         always {
           dir('spring-app') {
-            /* fixed glob → ** not */ */
+         
             junit  '**/target/surefire-reports/*.xml'
             jacoco execPattern: '**/target/jacoco.exec'
           }
