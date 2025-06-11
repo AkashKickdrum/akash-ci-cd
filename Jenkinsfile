@@ -1,10 +1,12 @@
 pipeline {
   agent any
+
   environment {
     AWS_DEFAULT_REGION = 'ap-northeast-1'
     EB_APP  = 'spring-version-app'
     EB_ENV  = 'spring-version-env'
-    SONARQUBE = 'SonarQube'
+
+    SONARQUBE   = 'SonarQube'
     SONAR_TOKEN = credentials('sonar-token')
   }
 
@@ -15,23 +17,31 @@ pipeline {
     }
 
     stage('Build + Unit tests') {
-      steps { sh 'mvn -B clean test' }
+      steps {
+        dir('spring-app') {
+          sh 'mvn -B clean test'
+        }
+      }
       post {
         always {
-          junit '**/target/surefire-reports/*.xml'
-          jacoco execPattern: '**/jacoco.exec'
+          dir('spring-app') {
+            junit  '**/target/surefire-reports/*.xml'
+            jacoco execPattern: '**/jacoco.exec'
+          }
         }
       }
     }
 
     stage('SonarQube Analysis') {
       steps {
-        withSonarQubeEnv(SONARQUBE) {
-          sh """
-            mvn -B sonar:sonar \
-              -Dsonar.projectKey=version-service \
-              -Dsonar.login=$SONAR_TOKEN
-          """
+        dir('spring-app') {
+          withSonarQubeEnv(SONARQUBE) {
+            sh """
+              mvn -B sonar:sonar \
+                -Dsonar.projectKey=version-service \
+                -Dsonar.login=$SONAR_TOKEN
+            """
+          }
         }
       }
     }
@@ -45,30 +55,49 @@ pipeline {
     }
 
     stage('Package') {
-      steps { sh 'mvn -B package -DskipTests' }
+      steps {
+        dir('spring-app') {
+          sh 'mvn -B package -DskipTests'
+        }
+      }
     }
 
     stage('Deploy to Elastic Beanstalk') {
       steps {
         sh '''
+          cd spring-app
           VERSION=$(date +%Y%m%d%H%M%S)
-          mkdir -p eb-bundle && cp target/*.jar eb-bundle/application.jar
+
+          # Bundle the jar
+          mkdir -p ../eb-bundle
+          cp target/*.jar ../eb-bundle/application.jar
+          cd ..
           zip -r app-$VERSION.zip eb-bundle
+
+          # Upload to S3 (bucket was created by Terraform)
+          aws s3 cp app-$VERSION.zip s3://$EB_APP-artifacts/app-$VERSION.zip
+
+          # Register application version & deploy
           aws elasticbeanstalk create-application-version \
               --application-name $EB_APP \
               --version-label $VERSION \
-              --source-bundle S3Bucket=$EB_APP-artifacts,S3Key=app-$VERSION.zip || true
-          aws s3 cp app-$VERSION.zip s3://$EB_APP-artifacts/
+              --source-bundle S3Bucket=$EB_APP-artifacts,S3Key=app-$VERSION.zip
+
           aws elasticbeanstalk update-environment \
               --environment-name $EB_ENV \
               --version-label $VERSION
-          aws elasticbeanstalk wait environment-updated --environment-name $EB_ENV
+
+          aws elasticbeanstalk wait environment-updated \
+              --environment-name $EB_ENV
         '''
       }
     }
   }
 
   post {
-    failure { mail to: 'your@email', subject: 'Pipeline failed', body: env.BUILD_URL }
+    failure {
+      echo "Pipeline failed  ➜  ${env.BUILD_URL}"
+      // (Optional) configure e-mail once SMTP is available
+    }
   }
 }
